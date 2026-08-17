@@ -18,10 +18,20 @@ clear all
 %close all
 
 %% Load files and setup
+% Headless mode: define autoCfg (see VoltImg_runMapping_headless.m) before running
+% this script to supply all paths/answers and suppress every interactive prompt.
+% Without autoCfg, every prompt below behaves exactly as before.
+isHeadless = exist('autoCfg', 'var') && isfield(autoCfg, 'headless') && autoCfg.headless;
+runInteractivePlots = ~isHeadless;   % post-analysis plotting cells
+
 % Step 1: Read the ephys file
 % ephysFilePath = char(uigetdir('E:\Voltage Imaging\VoltMapping\Ephys Data')); % Select and set root folder where all experiments with cells you want to analyze are located
 % ephysFilePath = char(uigetdir('/Volumes/ExData2/Voltage Imaging/VoltMapping/Ephys Data')); % Select and set root folder where all experiments with cells you want to analyze are located
-ephysFilePath = char(uigetdir('/Volumes/phoenixinthesky/Masato/Voltage Imaging Data_Phoenix/SliceMapping/ASAP7y Original Slice Experiment/DAQ Ephys Data/'));
+if exist('autoCfg', 'var') && isfield(autoCfg, 'ephysFilePath') && ~isempty(autoCfg.ephysFilePath)
+    ephysFilePath = char(autoCfg.ephysFilePath);
+else
+    ephysFilePath = char(uigetdir('/Volumes/phoenixinthesky/Masato/Voltage Imaging Data_Phoenix/SliceMapping/ASAP7y Original Slice Experiment/DAQ Ephys Data/'));
+end
 
 ephysFileDir = dir(ephysFilePath);
 load([ephysFileDir(end).folder, '/', ephysFileDir(end).name]);
@@ -30,7 +40,11 @@ disp(ephysFileDir(end).name);
 % Step 2: Identify the folder containing the imaging files correspdonding to the ephys file
 % ImgsFilePath = char(uigetdir('E:\Voltage Imaging\VoltMapping\Imaging Data')); % Select and set root folder where all experiments with cells you want to analyze are located
 % ImgsFilePath = char(uigetdir('/Volumes/ExData2/Voltage Imaging/VoltMapping/Imaging Data')); % Select and set root folder where all experiments with cells you want to analyze are located
-ImgsFilePath = char(uigetdir('/Users/masatosadahiro/Documents/Data/Voltage Imaging/Voltage Imaging/Slice Mapping/'));
+if exist('autoCfg', 'var') && isfield(autoCfg, 'imgsFilePath') && ~isempty(autoCfg.imgsFilePath)
+    ImgsFilePath = char(autoCfg.imgsFilePath);
+else
+    ImgsFilePath = char(uigetdir('/Users/masatosadahiro/Documents/Data/Voltage Imaging/Voltage Imaging/Slice Mapping/'));
+end
 
 ImgfolderContents = dir(ImgsFilePath);
 disp(ImgfolderContents(end).name);
@@ -46,8 +60,14 @@ end
 imagesIndex = find(~cellfun(@isempty, fileNames));
 
 % Step 3: NoRMCorre path
-normcorrePath = 'C:\Users\lamia\OneDrive\Documents\MATLAB\NoRMCorre-master';
-addpath(normcorrePath);
+if exist('autoCfg', 'var') && isfield(autoCfg, 'normcorrePath')
+    normcorrePath = autoCfg.normcorrePath;   % '' = assume already on path
+else
+    normcorrePath = 'C:\Users\lamia\OneDrive\Documents\MATLAB\NoRMCorre-master';
+end
+if ~isempty(normcorrePath) && isfolder(normcorrePath)
+    addpath(normcorrePath);
+end
 
 % --- Laser row artifact (applied to raw stacks before global template + NoRMCorre) ---
 useLaserRowArtifactFilter = false;
@@ -88,8 +108,16 @@ nextHoloDelay = unique(voltMapping.holoStimParams.nextHoloDelay); % Assume same 
 startTime = (voltMapping.holoStimParams.startTime)/1000;
 
 % Step 5: Identify GEVI type
-UpOrDown = input('1 for upward GEVI, 2 for downward GEVI: ', 's');
-ePhysAvail = input('1 if ephys readout avail, 2 if none: ');
+if exist('autoCfg', 'var') && isfield(autoCfg, 'UpOrDown') && ~isempty(autoCfg.UpOrDown)
+    UpOrDown = char(autoCfg.UpOrDown);   % char '1'/'2' — downstream compares UpOrDown == '2'
+else
+    UpOrDown = input('1 for upward GEVI, 2 for downward GEVI: ', 's');
+end
+if exist('autoCfg', 'var') && isfield(autoCfg, 'ePhysAvail') && ~isempty(autoCfg.ePhysAvail)
+    ePhysAvail = double(autoCfg.ePhysAvail);
+else
+    ePhysAvail = input('1 if ephys readout avail, 2 if none: ');
+end
 
 % Auto-detect whether raw TIFF stacks are single-channel or 2-color interleaved.
 % Assumes all stacks in this folder were acquired with identical settings,
@@ -431,12 +459,18 @@ voltMapping.ephys.nFirstPulseSample       = nFirstPulseSample;
 voltMapping.ephys.iLastPreStim            = iLastPreStim;
 
 %% Motion-correct all imaging trials with NoRMCorre and build maxDvStack
-input('Running NoRMCorre on all imaging trials, saving motion-corrected stacks, and building maxDvStack (continue or ctrl+c to stop!)');
+if ~isHeadless
+    input('Running NoRMCorre on all imaging trials, saving motion-corrected stacks, and building maxDvStack (continue or ctrl+c to stop!)');
+end
 
 % Setup save directory for motion-corrected images
 expID = num2str(mouseID);
 voltMapping.mouseID = ['voltMapping_Analysis_', expID, '_MultiCellAnalysis_MCfineROI_laserRowArtifact'];
-savePath = '/Volumes/X10 Pro/MC Imaging Data';
+if exist('autoCfg', 'var') && isfield(autoCfg, 'savePath') && ~isempty(autoCfg.savePath)
+    savePath = autoCfg.savePath;
+else
+    savePath = '/Volumes/X10 Pro/MC Imaging Data';
+end
 saveDirectory = fullfile(savePath, num2str(voltMapping.mouseID));
 if ~exist(saveDirectory, 'dir')
     mkdir(saveDirectory);
@@ -730,35 +764,49 @@ end
 disp(['Checkpoint saved (motion correction complete): ', checkpointAfterMcFile]);
 
 %% Calculate rough ROI mask on motion-corrected maxDvStack
-input('Viewing motion-corrected mean image for selecting rough ROIs (continue or ctrl+c to stop!)');
+if exist('autoCfg', 'var') && isfield(autoCfg, 'useAutoRoi') && autoCfg.useAutoRoi
+    % Automatic rough ROIs via Cellpose (auto_roi/voltimg_autoRoi_cellpose.m).
+    % Emits the same roughRoiXAllCells/roughRoiYAllCells contract as the
+    % drawfreehand branch below; nCells = number of accepted detections.
+    autoRoiDir = fullfile(saveDirectory, 'AutoROI');
+    if isfield(autoCfg, 'roi'), autoRoiCfg = autoCfg.roi; else, autoRoiCfg = struct(); end
+    [roughRoiXAllCells, roughRoiYAllCells, autoRoiReport] = ...
+        voltimg_autoRoi_cellpose(meanFluorMaxDvStack, autoRoiCfg, autoRoiDir);
+    nCells = numel(roughRoiXAllCells);
+    voltMapping.autoRoi = autoRoiReport;
+else
+    input('Viewing motion-corrected mean image for selecting rough ROIs (continue or ctrl+c to stop!)');
 
-figure(9); set(gcf, 'Position',  [100, 100, 1800, 900]); clf; 
-colormap('winter'); imagesc(meanFluorMaxDvStack); axis equal; axis image; colorbar; set(gca, 'fontsize', 12);
-nCells = input('How many neurons to analyze?: ', 's');
-nCells = str2double(nCells);
+    figure(9); set(gcf, 'Position',  [100, 100, 1800, 900]); clf;
+    colormap('winter'); imagesc(meanFluorMaxDvStack); axis equal; axis image; colorbar; set(gca, 'fontsize', 12);
+    nCells = input('How many neurons to analyze?: ', 's');
+    nCells = str2double(nCells);
 
-% Hand select cell or area of interest, by freehand drawing (rough ROIs)
-roughRoiXAllCells = cell(nCells, 1);
-roughRoiYAllCells = cell(nCells, 1);
+    % Hand select cell or area of interest, by freehand drawing (rough ROIs)
+    roughRoiXAllCells = cell(nCells, 1);
+    roughRoiYAllCells = cell(nCells, 1);
+
+    for nn = 1:nCells
+        f1 = figure(10);
+        set(gcf, 'Position',  [100, 100, 1800, 900]);
+        clf
+        colormap('winter'); imagesc(meanFluorMaxDvStack); axis equal; axis image; colorbar; set(gca, 'fontsize', 12);
+        roughRoiX = []; roughRoiY = [];
+        roiHandSelect = drawfreehand;
+        roiHandSelectMask = createMask(roiHandSelect);
+        [roughRoiX, roughRoiY] = find(roiHandSelectMask);
+
+        roughRoiXAllCells{nn} = roughRoiX;
+        roughRoiYAllCells{nn} = roughRoiY;
+        close(f1);
+    end
+end
+
+% Containers sized by nCells (filled by the global fine-ROI pass below)
 roiXAllCells_global = cell(nCells, 1);
 roiYAllCells_global = cell(nCells, 1);
 bkgrndRoiXAllCells = cell(nCells, 1);
 bkgrndRoiYAllCells = cell(nCells, 1);
-
-for nn = 1:nCells
-    f1 = figure(10);
-    set(gcf, 'Position',  [100, 100, 1800, 900]);
-    clf
-    colormap('winter'); imagesc(meanFluorMaxDvStack); axis equal; axis image; colorbar; set(gca, 'fontsize', 12);
-    roughRoiX = []; roughRoiY = [];
-    roiHandSelect = drawfreehand;
-    roiHandSelectMask = createMask(roiHandSelect);
-    [roughRoiX, roughRoiY] = find(roiHandSelectMask);
-
-    roughRoiXAllCells{nn} = roughRoiX;
-    roughRoiYAllCells{nn} = roughRoiY;
-    close(f1);
-end
 
 % Derive one "global" fine ROI per cell from meanFluorMaxDvStack using
 % the same gaussian + fibermetric approach, primarily for visualization
@@ -910,7 +958,9 @@ voltMapping.bkgrndRoiYAllCells     = bkgrndRoiYAllCells;
 voltMapping.allRois                = allRois;
 
 %% F, F0, dF, dF/F0 Calculation using motion-corrected stacks and per-trial fine ROIs
-input('This step uses motion-corrected movies, computes trial-specific fine ROIs, and calculates dF/F (ctrl+c to stop!)');
+if ~isHeadless
+    input('This step uses motion-corrected movies, computes trial-specific fine ROIs, and calculates dF/F (ctrl+c to stop!)');
+end
 
 % Preallocate containers for per-trial fine ROIs
 fineRoiXAllCells = cell(nCells, 1);
@@ -1437,6 +1487,8 @@ end
 disp(['Checkpoint saved (dF/F + trial excluder complete): ', checkpointAfterDffFile]);
 
 %% Align Exclusion-applied imaging with ephys traces
+% Skipped in headless runs; standalone cell use unaffected.
+if ~exist('runInteractivePlots', 'var') || runInteractivePlots
 nn = double(input('which cell number? '));
 
 exclCIDffAllConds = voltMapping.(cellID{nn}).exclCIDffAllConds;
@@ -1872,8 +1924,11 @@ for cc = 1:nConds
         pause
     end
 end
+end % runInteractivePlots
 
 %% Four-panel comparison: mean + 95% CI for all pipelines (1×4 subplots)
+% Skipped in headless runs; standalone cell use unaffected.
+if ~exist('runInteractivePlots', 'var') || runInteractivePlots
 cellIdx = double(input('which cell number (4-panel mean + CI)? '));
 
 holoSortedImagingMean         = voltMapping.(cellID{cellIdx}).holoSortedImagingMean;
@@ -1981,12 +2036,15 @@ for cc = 1:nConds
         pause
     end
 end
+end % runInteractivePlots
 
 %% Publication (light mode): filt mean + 95% CI + ephys, shared y-scale per condition, scale bars
 % One figure per (condition, hologram); advance with pause like the four-panel section. For each
 % condition, all holos share identical xlim, left ylim (dF/F percent), and right ylim (rel. Vm, mV).
 % Pre-stim mean subtracted from filt + ephys so baselines meet at y=0; symmetric ylims align zeros.
 % Scale bars: 1%% dF/F, 0.5 mV Vm (both vertical bars on the left), 10 ms horizontal.
+% Skipped in headless runs; standalone cell use unaffected.
+if ~exist('runInteractivePlots', 'var') || runInteractivePlots
 if ~exist('cellIdx', 'var')
     cellIdxPub = double(input('which cell number (publication filt + scale bars)? '));
 else
@@ -2234,8 +2292,11 @@ for ccPub = 1:nConds
         pause
     end
 end
+end % runInteractivePlots
 
 %% Power curve: peak mean dF/F (filt vs excl-filt) vs stim power
+% Skipped in headless runs; standalone cell use unaffected.
+if ~exist('runInteractivePlots', 'var') || runInteractivePlots
 if ~exist('cellIdx', 'var')
     cellIdx = double(input('which cell number (power curve)? '));
 end
@@ -2306,8 +2367,11 @@ ylabel('Peak mean dF/F (%)');
 title(sprintf('Cell %d — exclFiltHoloSortedImagingMean (plateau = mean at top %d powers)', cellIdx, nPlateauPowerPts));
 legend('Location', 'best');
 grid on
+end % runInteractivePlots
 
 %% Optional sanity-check visualization: per-trial ROI vs neuropil ring overlap
+% Skipped in headless runs (runInteractivePlots false); standalone cell use unaffected.
+if ~exist('runInteractivePlots', 'var') || runInteractivePlots
 doNeuropilSanityPlot = true;   % set false to skip; samples trials every sanityTrialStep
 sanityTrialStep = 300;          % trials 1, 1+step, 1+2*step, ... up to nTrials
 if doNeuropilSanityPlot
@@ -2377,6 +2441,7 @@ if doNeuropilSanityPlot
             ['every ', num2str(sanityTrialStep), ' trials (1:', num2str(sanityTrialStep), ':', num2str(nTrials), ')']});
     end
 end
+end % runInteractivePlots
 
 %% Save Analysis Results
 expID = num2str(mouseID);
@@ -2388,7 +2453,11 @@ end
 if exist('ePhysAvail', 'var')
     voltMapping.ePhysAvail = ePhysAvail;
 end
-directory = '/Users/masatosadahiro/Documents/Data/Voltage Imaging/Voltage Imaging/voltMapping/Analysis Results/Analysis_newMCanddFFcalc';
+if exist('autoCfg', 'var') && isfield(autoCfg, 'resultsDir') && ~isempty(autoCfg.resultsDir)
+    directory = autoCfg.resultsDir;
+else
+    directory = '/Users/masatosadahiro/Documents/Data/Voltage Imaging/Voltage Imaging/voltMapping/Analysis Results/Analysis_newMCanddFFcalc';
+end
 fileName = [num2str(voltMapping.mouseID), '.mat'];
 % Crash checkpoints (under saveDirectory, next to Motion_Corrected_Tiffs):
 % checkpoint_after_motion_correction.mat, checkpoint_after_dff_calculation.mat
